@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +24,7 @@ var (
 	clientID    string
 	clientPort  int
 	messages    []Message
-	allMessages []Message
+	allMessages = make(map[string]Message)
 	clients     = make(map[string]string) // id -> ip:port
 	upgrader    = websocket.Upgrader{}
 	ui          *gocui.Gui
@@ -118,6 +117,7 @@ func startServer() {
 
 			id := parts[0]
 			ipPort := _addr.IP.String() + ":" + parts[1]
+			// ensure the client isn't connected before
 			if id != clientID {
 				clients[id] = ipPort
 				updateClientsView()
@@ -144,19 +144,9 @@ func connectToClient(ipPort string) {
 		return
 	}
 
-	allMessages = append(allMessages, newMessages...)
-	sort.Slice(allMessages, func(i, j int) bool {
-		return allMessages[i].Timestamp < allMessages[j].Timestamp
-	})
-	messages = make([]Message, len(allMessages))
-	j := 0
-	for i := 0; i < len(allMessages); i++ {
-		if i == 0 || allMessages[i].ID != allMessages[i-1].ID || allMessages[i].Timestamp != allMessages[i-1].Timestamp {
-			messages[j] = allMessages[i]
-			j++
-		}
+	for _, msg := range newMessages {
+		allMessages[msg.ID] = msg
 	}
-	messages = messages[:j]
 
 	updateMessagesView()
 }
@@ -246,15 +236,14 @@ func sendMessage(g *gocui.Gui, v *gocui.View) error {
 		return nil
 	}
 
+	ts := time.Now().Unix()
 	newMsg := Message{
-		ID:        clientID,
-		Timestamp: time.Now().Unix(),
+		ID:        fmt.Sprintln(clientID, ts),
+		Timestamp: ts,
 		Msg:       msg,
 	}
 	messages = append(messages, newMsg)
-	sort.Slice(messages, func(i, j int) bool {
-		return messages[i].Timestamp < messages[j].Timestamp
-	})
+	allMessages[newMsg.ID] = newMsg
 	updateMessagesView()
 	return nil
 }
@@ -290,7 +279,7 @@ func updateMessagesView() {
 			return err
 		}
 		v.Clear()
-		for _, msg := range messages {
+		for _, msg := range allMessages {
 			fmt.Fprintf(v, "[%s] %s: %s\n", time.Unix(msg.Timestamp, 0).Format("15:04:05"), msg.ID, msg.Msg)
 		}
 		return nil

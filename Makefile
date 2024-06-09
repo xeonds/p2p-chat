@@ -4,7 +4,7 @@ chat:
 	@go build -o chat
 
 clean:
-	@rm chat br
+	@rm chat
 
 test:
 	@docker network create lan-net
@@ -29,12 +29,12 @@ test:
 	@tmux send-keys "docker exec -it node3 bash" C-m
 
 	@tmux select-pane -t 0
-	@tmux send-keys "cd /app && ./br" C-m
+	@tmux send-keys "cd /app && ./chat" C-m
 
 	@tmux select-pane -t 1
-	@tmux send-keys "cd /app && ./br" C-m
+	@tmux send-keys "cd /app && ./chat" C-m
 
 	@tmux select-pane -t 2
-	@tmux send-keys "cd /app && ./br" C-m
+	@tmux send-keys "cd /app && ./chat" C-m
 
 	@tmux attach -t lan-discovery
