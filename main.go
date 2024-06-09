@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,8 +32,6 @@ var (
 	messageView = "messages"
 	clientsView = "clients"
 	sendView    = "send"
-	logView     = "log"
-	logActive   bool
 )
 
 func main() {
@@ -83,7 +82,6 @@ func startBroadcast() {
 	for {
 		message := fmt.Sprintf("%s:%d", clientID, clientPort)
 		fmt.Fprint(conn, message)
-		vlog("Broadcasting:", message)
 		time.Sleep(2 * time.Second)
 	}
 }
@@ -94,21 +92,17 @@ func startServer() {
 
 	udpAddr, err := net.ResolveUDPAddr("udp", ":9876")
 	if err != nil {
-		vlog(err)
+		log.Println(err)
 	}
 	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		vlog(err)
+		log.Println(err)
 	}
 	defer conn.Close()
 	buf := make([]byte, 1024)
 
 	for {
-		n, addr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			vlog(err)
-			continue
-		}
+		n, addr, _ := conn.ReadFromUDP(buf)
 		func(_data string, _addr *net.UDPAddr) {
 			parts := strings.Split(_data, ":")
 			if len(parts) != 2 {
@@ -121,50 +115,48 @@ func startServer() {
 			if id != clientID {
 				clients[id] = ipPort
 				updateClientsView()
-				go connectToClient(ipPort)
+				go func(ipPort string) {
+					u := "ws://" + ipPort + "/ws"
+					conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+					if err != nil {
+						log.Println(err)
+						return
+					}
+					defer conn.Close()
+
+					var newMessages []Message
+					err = conn.ReadJSON(&newMessages)
+					if err != nil {
+						log.Println("ReadJSON:", err)
+						return
+					}
+
+					for _, msg := range newMessages {
+						allMessages[msg.ID] = msg
+					}
+
+					updateMessagesView()
+				}(ipPort)
 			}
 		}(string(buf[:n]), addr)
 	}
 }
 
-func connectToClient(ipPort string) {
-	u := "ws://" + ipPort + "/ws"
-	vlog("Connecting to:", u)
-	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
-	if err != nil {
-		vlog("Dial:", err)
-		return
-	}
-	defer conn.Close()
-
-	var newMessages []Message
-	err = conn.ReadJSON(&newMessages)
-	if err != nil {
-		vlog("ReadJSON:", err)
-		return
-	}
-
-	for _, msg := range newMessages {
-		allMessages[msg.ID] = msg
-	}
-
-	updateMessagesView()
-}
-
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		vlog("Upgrade:", err)
+		log.Println("Upgrade:", err)
 		return
 	}
 	defer conn.Close()
 	err = conn.WriteJSON(messages)
 	if err != nil {
-		vlog("WriteJSON:", err)
+		log.Println("WriteJSON:", err)
 		return
 	}
 }
 
+// UI implementation
 func layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 
@@ -194,20 +186,10 @@ func layout(g *gocui.Gui) error {
 			return err
 		}
 	}
-
-	// if v, err := g.SetView(logView, maxX/4, maxY/4, maxX-1-maxX/4, maxY-1-maxY/4); err != nil {
-	// 	if err != gocui.ErrUnknownView {
-	// 		return err
-	// 	}
-	// 	v.Frame = true
-	// 	v.Wrap = true
-	// 	v.Autoscroll = true
-	// 	v.Title = "Log"
-	// }
-
 	return nil
 }
 
+// KeyBindings for TUI
 func keybindings(g *gocui.Gui) error {
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		return err
@@ -219,9 +201,6 @@ func keybindings(g *gocui.Gui) error {
 		return err
 	}
 	if err := g.SetKeybinding(messageView, gocui.KeyPgdn, gocui.ModNone, cursorPgdn); err != nil {
-		return err
-	}
-	if err := g.SetKeybinding("", gocui.KeyEsc, gocui.ModNone, toggleLog); err != nil {
 		return err
 	}
 	return nil
@@ -272,6 +251,7 @@ func quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
+// View Update for messages
 func updateMessagesView() {
 	ui.Update(func(g *gocui.Gui) error {
 		v, err := g.View(messageView)
@@ -279,13 +259,24 @@ func updateMessagesView() {
 			return err
 		}
 		v.Clear()
-		for _, msg := range allMessages {
+
+		for _, msg := range func(msg map[string]Message) []Message {
+			s := make([]Message, 0, len(msg))
+			for _, m := range msg {
+				s = append(s, m)
+			}
+			sort.Slice(s, func(i, j int) bool {
+				return s[i].Timestamp < s[j].Timestamp
+			})
+			return s
+		}(allMessages) {
 			fmt.Fprintf(v, "[%s] %s: %s\n", time.Unix(msg.Timestamp, 0).Format("15:04:05"), msg.ID, msg.Msg)
 		}
 		return nil
 	})
 }
 
+// View Update for clients
 func updateClientsView() {
 	ui.Update(func(g *gocui.Gui) error {
 		v, err := g.View(clientsView)
@@ -298,27 +289,4 @@ func updateClientsView() {
 		}
 		return nil
 	})
-}
-
-func toggleLog(g *gocui.Gui, v *gocui.View) error {
-	logActive = !logActive
-	if logActive {
-		g.SetViewOnTop(logView)
-	} else {
-		g.SetViewOnBottom(logView)
-	}
-	return nil
-}
-
-func vlog(args ...interface{}) {
-	if logActive {
-		ui.Update(func(g *gocui.Gui) error {
-			v, err := g.View(logView)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(v, args...)
-			return nil
-		})
-	}
 }

@@ -16,25 +16,17 @@ test:
 	@tmux new-session -d -s lan-discovery
 	@tmux split-window -h
 	@tmux split-window -v
-	@tmux select-pane -t 0
-	@tmux split-window -v
 
 	@tmux select-pane -t 0
 	@tmux send-keys "docker exec -it node1 bash" C-m
+	@tmux send-keys "cd /app && ./chat" C-m
 
 	@tmux select-pane -t 1
 	@tmux send-keys "docker exec -it node2 bash" C-m
+	@tmux send-keys "cd /app && ./chat" C-m
 
 	@tmux select-pane -t 2
 	@tmux send-keys "docker exec -it node3 bash" C-m
-
-	@tmux select-pane -t 0
-	@tmux send-keys "cd /app && ./chat" C-m
-
-	@tmux select-pane -t 1
-	@tmux send-keys "cd /app && ./chat" C-m
-
-	@tmux select-pane -t 2
 	@tmux send-keys "cd /app && ./chat" C-m
 
 	@tmux attach -t lan-discovery
