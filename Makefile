@@ -1,8 +1,7 @@
+all: chat
+
 chat:
 	@go build -o chat
-
-br:
-	@cd broadcast && go build -o ../br
 
 clean:
 	@rm chat br
